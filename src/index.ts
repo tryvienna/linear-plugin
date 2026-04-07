@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { definePlugin } from '@tryvienna/sdk';
 import { linearIntegration } from './integration';
 import { linearIssueEntity } from './entities';
@@ -15,6 +16,50 @@ export const linearPlugin = definePlugin({
 
   integrations: [linearIntegration],
   entities: [linearIssueEntity],
+
+  listensTo: [
+    {
+      event: 'core.turn.completed',
+      handler: (payload: unknown) => {
+        const data = payload as {
+          workstreamId: string;
+          directories: Array<{
+            path: string;
+            branch: string | null;
+            files: Array<{ path: string; status: string; additions: number; deletions: number }>;
+          }>;
+        };
+
+        // Check each directory for TODOs in the diff
+        for (const dir of data.directories) {
+          if (dir.files.length === 0) continue;
+          try {
+            // Get the unified diff of unstaged + staged changes
+            const diff = execSync('git diff HEAD', {
+              cwd: dir.path,
+              encoding: 'utf-8',
+              timeout: 10_000,
+            });
+
+            // Look for added lines containing TODO
+            const addedTodos = diff
+              .split('\n')
+              .filter((line) => line.startsWith('+') && !line.startsWith('+++') && /\bTODO\b/i.test(line));
+
+            if (addedTodos.length > 0) {
+              console.log('Hello World');
+              console.log(`[linear] Detected ${addedTodos.length} new TODO(s) in ${dir.path}:`);
+              for (const line of addedTodos) {
+                console.log(`  ${line}`);
+              }
+            }
+          } catch {
+            // git diff failed (not a repo, etc.) — skip silently
+          }
+        }
+      },
+    },
+  ],
 
   canvases: {
     feed: {
